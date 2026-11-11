@@ -8,7 +8,13 @@ const LEAF_START = 1.5;
 const LEAF_END = 5;
 const BLOOM_START = 3;
 const BLOOM_END = 9;
-const RAMP = ' .,:;i1tfLCG08@';
+const FULL_START = 9;
+const FULL_END = 17;
+const UNFOLD_A = 0.9;
+const UNFOLD_B = 0.65;
+const UNFOLD_C = 0.5;
+const DROOP = 0.9;
+const RAMP = ' .:-=+*#%@';
 
 const BASE_Y = 0.52;
 const CUP_H = 0.3;
@@ -21,6 +27,7 @@ const LEAVES = [
 
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const smooth = (t) => t * t * (3 - 2 * t);
+const smoother = (t) => t * t * t * (t * (6 * t - 15) + 10);
 const fract = (v) => v - Math.floor(v);
 const hash = (i, j) => fract(Math.sin(i * 127.1 + j * 311.7) * 43758.5453);
 
@@ -48,6 +55,7 @@ function createScene(W, H) {
     const leafP = smooth(clamp((t - LEAF_START) / (LEAF_END - LEAF_START)));
     const open = smooth(clamp((t - BLOOM_START) / (BLOOM_END - BLOOM_START)));
     const bloomP = smooth(clamp((t - 2) / 2));
+    const full = smoother(clamp((t - FULL_START) / (FULL_END - FULL_START)));
     const swayAmp = 0.025 * stemP;
     const offset = (y) => Math.sin(t * 1.1) * swayAmp * y * y;
     const cx = offset(BASE_Y);
@@ -87,28 +95,75 @@ function createScene(W, H) {
           }
         }
 
-        if (bloomP > 0.01) {
-          const s = (y - BASE_Y) / (CUP_H * bloomP);
+        const xc = x - cx - offset(y) + offset(BASE_Y);
+        const yc = y - BASE_Y;
+        let xl = xc;
+        let yl = yc;
+        let petal = bloomP > 0.01;
+        if (full > 0) {
+          const yd = yc + DROOP * full * xc * xc;
+          const rp = Math.hypot(xc, yd);
+          const f = (Math.atan2(Math.abs(xc), yd) - UNFOLD_A * full - 0.04 * full * Math.sin(t * 1.3)) / (1 + UNFOLD_B * full);
+          if (f < 0) {
+            petal = false;
+          } else {
+            const r = rp / (1 + UNFOLD_C * full);
+            xl = (xc < 0 ? -1 : 1) * r * Math.sin(f);
+            yl = r * Math.cos(f);
+          }
+        }
+
+        if (petal) {
+          const s = yl / (CUP_H * bloomP);
           if (s > 0 && s < 1.02) {
             const belly = 0.22 + 0.78 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 0.88)), 0.9);
             const flare = 1 + open * 1.5 * Math.pow(s, 2.5);
             const pinch = 1 - (1 - open) * 0.85 * Math.pow(s, 3);
             const w = CUP_R * bloomP * belly * flare * pinch;
-            const u = (x - cx - offset(y) + offset(BASE_Y)) / Math.max(w, 1e-6);
+            const u = xl / Math.max(w, 1e-6);
 
-            if (Math.abs(u) <= 1) {
+            const ruffle = 0.06 * full * Math.sin(s * 18 + t * 0.8 + (u < 0 ? 0 : 2));
+            if (Math.abs(u) <= 1 + ruffle) {
               const local = fract((u + 1) / (2 / 3));
-              const tip = 1 - Math.abs(2 * local - 1);
-              const sTop = 0.8 + 0.22 * tip * tip + 0.04 * open;
+              const lobe = 1 - Math.abs(2 * local - 1);
+              const sTop = 0.8 + 0.22 * Math.pow(lobe, 2 - 1.5 * full) + 0.04 * open + 0.025 * full * Math.sin(u * 9 + t);
               if (s <= sTop) {
-                const onSeam = Math.abs(Math.abs(u) - 1 / 3) < 0.05 || Math.abs(u) > 0.97;
+                const edgeD = Math.min(1 + ruffle - Math.abs(u), (sTop - s) * 4);
+                const rim = 1 - smooth(clamp(edgeD / 0.18));
+                const seam = Math.abs(Math.abs(u) - 1 / 3) < 0.05 ? 0.78 : 1;
                 const round = Math.sqrt(Math.max(0, 1 - u * u));
+                const vein = Math.pow(Math.max(0, Math.cos(u * Math.PI * 5)), 24) * (1 - smooth(clamp(s / 0.8))) * full;
                 const light = 0.3 + 0.5 * round * (0.6 + 0.4 * (0.5 - 0.5 * u)) + 0.25 * s * open;
-                const v = clamp(light * (onSeam ? 0.55 : 1) + 0.04 * Math.sin(t * 2 + s * 6));
-                ch = onSeam && v < 0.5 ? '|' : RAMP[3 + Math.floor(v * (RAMP.length - 4))];
-                rgb = [90 + 165 * v, 4 + 30 * v * v, 18 + 30 * v];
+                const v = clamp(light * seam + 0.04 * Math.sin(t * 2 + s * 6) + 0.2 * vein);
+                const soft = v * (1 - 0.35 * rim);
+                ch = RAMP[2 + Math.floor(soft * (RAMP.length - 3))];
+                const k = rim * 0.55;
+                rgb = [
+                  (90 + 165 * v) * (1 - k) + 255 * k,
+                  (4 + 30 * v * v) * (1 - k) + 110 * k + 120 * vein,
+                  (18 + 30 * v) * (1 - k) + 95 * k + 90 * vein,
+                ];
               }
             }
+          }
+        }
+
+        if (full > 0) {
+          const colH = 0.04 + 0.36 * full;
+          if (yc > -0.02 && yc < colH && Math.abs(xc) < Math.max(0.011, 0.5 / unit)) {
+            ch = '|';
+            rgb = [250, 215, 160];
+          }
+          const ay = (yc - (colH - 0.07)) / 0.06;
+          const ax = xc / 0.045;
+          if (full > 0.15 && ax * ax + ay * ay < 1) {
+            const hs = hash(i + 3, j + 5);
+            ch = hs > 0.5 ? 'o' : hs > 0.25 ? '*' : '.';
+            rgb = hs > 0.6 ? [255, 205, 100] : [235, 145, 60];
+          }
+          if (full > 0.3 && Math.hypot(xc / 0.016, (yc - colH - 0.012) / 0.03) < 1) {
+            ch = 'o';
+            rgb = [255, 115, 95];
           }
         }
 
