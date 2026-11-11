@@ -2,24 +2,22 @@
 'use strict';
 
 const FPS = 60;
-const GROW_SECONDS = 7;
-const RAMP = ' .,:;i1tfLCG08@';
 const CELL_ASPECT = 2;
+const STEM_END = 3;
+const LEAF_START = 1.5;
+const LEAF_END = 5;
+const BLOOM_START = 3;
+const BLOOM_END = 9;
+const RAMP = ' .,:;i1tfLCG08@';
 
-const HEAD_BASE = 0.52;
+const BASE_Y = 0.52;
+const CUP_H = 0.3;
+const CUP_R = 0.08;
+
 const LEAVES = [
-  { y0: 0.2, side: -1 },
-  { y0: 0.34, side: 1 },
+  { side: -1, y0: 0.14, len: 0.3, reach: 0.12, width: 0.03 },
+  { side: 1, y0: 0.22, len: 0.26, reach: 0.1, width: 0.027 },
 ];
-
-const EL = 0.72;
-const SIN_EL = Math.sin(EL);
-const COS_EL = Math.cos(EL);
-const LIGHT = (() => {
-  const v = [-0.45, -0.5, 0.75];
-  const n = Math.hypot(...v);
-  return v.map((c) => c / n);
-})();
 
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -42,88 +40,22 @@ function fg(depth, r, g, b) {
   return '';
 }
 
-const T_MIN = 4 * Math.PI;
-const T_MAX = 24 * Math.PI;
-function rosePoint(x, t) {
-  const p = (Math.PI / 2) * Math.exp(-t / (8 * Math.PI));
-  const u = 1 - (1 - ((3.6 * t) % (2 * Math.PI)) / Math.PI) ** 4 / 2;
-  const y = 2 * (x * x - x) ** 2 * Math.sin(p);
-  const r = u * (x * Math.sin(p) + y * Math.cos(p));
-  return [r * Math.cos(t), r * Math.sin(t), u * (x * Math.cos(p) - y * Math.sin(p))];
-}
-
-function sampleRose(nt, nx) {
-  const pts = new Float32Array(nt * nx * 6);
-  let o = 0;
-  for (let a = 0; a < nt; a++) {
-    const t = T_MIN + ((T_MAX - T_MIN) * a) / (nt - 1);
-    for (let b = 0; b < nx; b++) {
-      const x = b / (nx - 1);
-      const P = rosePoint(x, t);
-      const Px = rosePoint(x + 1e-3, t);
-      const Pt = rosePoint(x, t + 1e-3);
-      const ax = Px[0] - P[0], ay = Px[1] - P[1], az = Px[2] - P[2];
-      const bx = Pt[0] - P[0], by = Pt[1] - P[1], bz = Pt[2] - P[2];
-      const nX = ay * bz - az * by;
-      const nY = az * bx - ax * bz;
-      const nZ = ax * by - ay * bx;
-      const len = Math.hypot(nX, nY, nZ) || 1;
-      pts.set([P[0], P[1], P[2], nX / len, nY / len, nZ / len], o);
-      o += 6;
-    }
-  }
-  return pts;
-}
-
 function createScene(W, H) {
   const unit = CELL_ASPECT * (H - 1);
-  const rowsPerUnit = 0.2 * (H - 1);
-  const colsPerUnit = rowsPerUnit * CELL_ASPECT;
-  const nx = clamp(Math.ceil(colsPerUnit * 2), 24, 90);
-  const nt = clamp(Math.ceil(colsPerUnit * 113), 800, 4500);
-  const pts = sampleRose(nt, nx);
-  const zbuf = new Float32Array(W * H);
-  const shade = new Float32Array(W * H);
 
   function render(t, depth) {
-    const p = clamp(t / GROW_SECONDS);
-    const stemP = smooth(clamp(p / 0.4));
-    const leafP = smooth(clamp((p - 0.25) / 0.35));
-    const bloom = smooth(clamp((p - 0.4) / 0.6));
-    const swayAmp = 0.03 * stemP;
-    const offset = (y) => Math.sin(t * 1.2) * swayAmp * y * y;
-
-    zbuf.fill(-Infinity);
-    if (bloom > 0) {
-      const headCol = W / 2 + offset(HEAD_BASE) * unit;
-      const headRow = (1 - HEAD_BASE) * (H - 1);
-      const first = Math.floor((1 - bloom) * (nt - 1)) * nx;
-      const yaw = t * 0.45;
-      const cw = Math.cos(yaw);
-      const sw = Math.sin(yaw);
-      for (let k = first; k < nt * nx; k++) {
-        const o = k * 6;
-        const X = pts[o], Y = pts[o + 1], Z = pts[o + 2];
-        const Xr = X * cw - Y * sw;
-        const Yr = X * sw + Y * cw;
-        const col = Math.round(headCol + Xr * colsPerUnit);
-        const row = Math.round(headRow - (Yr * SIN_EL + Z * COS_EL) * rowsPerUnit);
-        if (col < 0 || col >= W || row < 0 || row >= H) continue;
-        const d = Z * SIN_EL - Yr * COS_EL;
-        const cell = row * W + col;
-        if (d <= zbuf[cell]) continue;
-        zbuf[cell] = d;
-        const nxr = pts[o + 3] * cw - pts[o + 4] * sw;
-        const nyr = pts[o + 3] * sw + pts[o + 4] * cw;
-        const lam = Math.abs(nxr * LIGHT[0] + nyr * LIGHT[1] + pts[o + 5] * LIGHT[2]);
-        shade[cell] = clamp(0.2 + 0.8 * lam);
-      }
-    }
+    const stemP = smooth(clamp(t / STEM_END));
+    const leafP = smooth(clamp((t - LEAF_START) / (LEAF_END - LEAF_START)));
+    const open = smooth(clamp((t - BLOOM_START) / (BLOOM_END - BLOOM_START)));
+    const bloomP = smooth(clamp((t - 2) / 2));
+    const swayAmp = 0.025 * stemP;
+    const offset = (y) => Math.sin(t * 1.1) * swayAmp * y * y;
+    const cx = offset(BASE_Y);
 
     const rows = [];
     for (let j = 0; j < H; j++) {
       const y = 1 - j / (H - 1);
-      const stemHalf = (0.6 + 0.5 * (1 - y)) / unit;
+      const stemHalf = (0.6 + 0.4 * (1 - y)) / unit;
       let row = '';
       let last = '';
 
@@ -133,50 +65,70 @@ function createScene(W, H) {
         let ch = ' ';
         let rgb = null;
 
-        if (zbuf[j * W + i] > -Infinity) {
-          const v = shade[j * W + i];
-          ch = RAMP[1 + Math.floor(v * (RAMP.length - 2))];
-          rgb = [70 + 185 * v, 5 + 40 * v * v, 20 + 35 * v];
-        } else {
-          if (y <= HEAD_BASE * stemP && Math.abs(dx) < stemHalf) {
-            const g = 0.55 + 0.45 * Math.abs(Math.sin(y * 40 + t));
-            ch = '|';
-            rgb = [20, 90 + 120 * g, 40];
-          }
+        if (y <= BASE_Y * stemP && Math.abs(dx) < stemHalf) {
+          const g = 0.55 + 0.45 * Math.abs(Math.sin(y * 40 + t));
+          ch = '|';
+          rgb = [20, 90 + 120 * g, 40];
+        }
 
-          if (leafP > 0) {
-            for (const { y0, side } of LEAVES) {
-              const lx = dx * side;
-              const ly = y - y0;
-              const c = Math.SQRT1_2;
-              const a = (lx + ly) * c - 0.09 * leafP;
-              const b = (ly - lx) * c;
-              const e = (a / (0.1 * leafP)) ** 2 + (b / (0.032 * leafP)) ** 2;
-              if (e < 1) {
-                ch = Math.abs(b) < 0.004 ? (side > 0 ? '/' : '\\') : '%&$#'[Math.floor(hash(i, j) * 4)];
-                rgb = [15, 70 + 130 * (1 - e * 0.6), 35];
+        if (leafP > 0) {
+          for (const L of LEAVES) {
+            const s = (y - L.y0) / (L.len * leafP);
+            if (s <= 0 || s >= 1) continue;
+            const center = L.side * L.reach * leafP * s * s;
+            const half = L.width * leafP * Math.pow(Math.sin(Math.PI * Math.pow(s, 0.8)), 0.8);
+            const d = Math.abs(dx - center);
+            if (d < Math.max(half, 0.5 / unit)) {
+              const rib = d < 0.7 / unit;
+              ch = rib ? (L.side > 0 ? '/' : '\\') : '%&$#'[Math.floor(hash(i, j) * 4)];
+              const v = clamp(1 - (d / Math.max(half, 1e-6)) * 0.6);
+              rgb = [15, 70 + 130 * v, 35];
+            }
+          }
+        }
+
+        if (bloomP > 0.01) {
+          const s = (y - BASE_Y) / (CUP_H * bloomP);
+          if (s > 0 && s < 1.02) {
+            const belly = 0.22 + 0.78 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 0.88)), 0.9);
+            const flare = 1 + open * 1.5 * Math.pow(s, 2.5);
+            const pinch = 1 - (1 - open) * 0.85 * Math.pow(s, 3);
+            const w = CUP_R * bloomP * belly * flare * pinch;
+            const u = (x - cx - offset(y) + offset(BASE_Y)) / Math.max(w, 1e-6);
+
+            if (Math.abs(u) <= 1) {
+              const local = fract((u + 1) / (2 / 3));
+              const tip = 1 - Math.abs(2 * local - 1);
+              const sTop = 0.8 + 0.22 * tip * tip + 0.04 * open;
+              if (s <= sTop) {
+                const onSeam = Math.abs(Math.abs(u) - 1 / 3) < 0.05 || Math.abs(u) > 0.97;
+                const round = Math.sqrt(Math.max(0, 1 - u * u));
+                const light = 0.3 + 0.5 * round * (0.6 + 0.4 * (0.5 - 0.5 * u)) + 0.25 * s * open;
+                const v = clamp(light * (onSeam ? 0.55 : 1) + 0.04 * Math.sin(t * 2 + s * 6));
+                ch = onSeam && v < 0.5 ? '|' : RAMP[3 + Math.floor(v * (RAMP.length - 4))];
+                rgb = [90 + 165 * v, 4 + 30 * v * v, 18 + 30 * v];
               }
             }
           }
+        }
 
-          if (!rgb) {
-            const h = hash(i, j);
-            if (h > 0.985) {
-              const r = hash(j + 17, i + 3);
-              const tw = 0.7 + 0.3 * Math.sin(t * 1.5 + h * 80);
-              let vis = 1;
-              if (r > 0.65) {
-                const ph = fract(t / (5 + 7 * hash(i + 9, j + 5)) + r * 7);
-                if (ph >= 0.6 && ph < 0.7) vis = 1 - smooth((ph - 0.6) / 0.1);
-                else if (ph >= 0.7 && ph < 0.85) vis = 0;
-                else if (ph >= 0.85 && ph < 0.95) vis = smooth((ph - 0.85) / 0.1);
-              }
-              const br = tw * vis;
-              if (br > 0.12) {
-                ch = br > 0.6 ? '+' : '.';
-                const sv = 70 + 150 * br;
-                rgb = [sv, sv, sv];
-              }
+        if (!rgb) {
+          const h = hash(i, j);
+          if (h > 0.985) {
+            const r = hash(j + 17, i + 3);
+            const tw = 0.7 + 0.3 * Math.sin(t * 1.5 + h * 80);
+            let vis = 1;
+            if (r > 0.65) {
+              const ph = fract(t / (5 + 7 * hash(i + 9, j + 5)) + r * 7);
+              if (ph >= 0.6 && ph < 0.7) vis = 1 - smooth((ph - 0.6) / 0.1);
+              else if (ph >= 0.7 && ph < 0.85) vis = 0;
+              else if (ph >= 0.85 && ph < 0.95) vis = smooth((ph - 0.85) / 0.1);
+            }
+            const br = tw * vis;
+            if (br > 0.12) {
+              ch = br > 0.6 ? '+' : '.';
+              const sv = 70 + 150 * br;
+              rgb = [sv, sv, sv];
             }
           }
         }
@@ -201,7 +153,7 @@ function createScene(W, H) {
 function main() {
   const out = process.stdout;
   if (!out.isTTY) {
-    process.stderr.write('rose.js needs an interactive terminal.\n');
+    process.stderr.write('tulip.js needs an interactive terminal.\n');
     process.exit(1);
   }
 
