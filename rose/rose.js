@@ -162,11 +162,20 @@ function createScene(W, H) {
           if (!rgb) {
             const h = hash(i, j);
             if (h > 0.985) {
-              const tw = 0.5 + 0.5 * Math.sin(t * 2 + h * 80);
-              if (tw > 0.25) {
-                ch = tw > 0.8 ? '+' : '.';
-                const s = 70 + 150 * tw;
-                rgb = [s, s, s];
+              const r = hash(j + 17, i + 3);
+              const tw = 0.7 + 0.3 * Math.sin(t * 1.5 + h * 80);
+              let vis = 1;
+              if (r > 0.65) {
+                const ph = fract(t / (5 + 7 * hash(i + 9, j + 5)) + r * 7);
+                if (ph >= 0.6 && ph < 0.7) vis = 1 - smooth((ph - 0.6) / 0.1);
+                else if (ph >= 0.7 && ph < 0.85) vis = 0;
+                else if (ph >= 0.85 && ph < 0.95) vis = smooth((ph - 0.85) / 0.1);
+              }
+              const br = tw * vis;
+              if (br > 0.12) {
+                ch = br > 0.6 ? '+' : '.';
+                const sv = 70 + 150 * br;
+                rgb = [sv, sv, sv];
               }
             }
           }
